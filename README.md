@@ -1,12 +1,11 @@
-# RRFS-A Smoke Globe
+# DataOrbit
 
-An interactive 3D globe visualization of NOAA RRFS-A vertically integrated smoke (column mass density) data, built with React, HeroUI v3, MapLibre GL, and Tailwind CSS 4.
+An interactive 3D globe visualization of NETCDF data, built with React, HeroUI v3, MapLibre GL, and Tailwind CSS 4.
 
 ## Features
 
 - **Upload any NetCDF file** — drag & drop or click to browse; the app auto-detects the COLMD smoke variable, parses it client-side (no server needed), and streams it onto the globe
 - **Interactive globe** — pan, zoom, tilt via MapLibre GL's `globe` projection
-- **NOAA colormap** — exact color ramp extracted from official RRFS product imagery (mg m⁻²)
 - **Live controls** — smoothing radius, intensity, opacity, and boundary opacity sliders update the heatmap instantly
 - **Prominent boundaries** — country borders (white) and state/province borders (dashed blue) rendered on top of the smoke layer via OpenMapTiles vector tiles
 
