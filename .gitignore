@@ -1,0 +1,47 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+
+# Vite
+.vite/
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.local
+
+# Logs and debug
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Testing and coverage
+coverage/
+*.lcov
+.nyc_output/
+
+# Caches and temp
+.cache/
+.parcel-cache/
+.turbo/
+.temp/
+tmp/
+*.tsbuildinfo
+.eslintcache
+.stylelintcache
+
+# Editor and OS
+.DS_Store
+Thumbs.db
+.idea/
+*.swp
+*.swo
+*~
