@@ -1,11 +1,35 @@
 import { CardRoot, CardContent, SliderRoot, SliderTrack, SliderFill, SliderThumb } from '@heroui/react'
 
-export default function ControlPanel({ radius, intensity, opacity, boundaryOpacity, onChange }) {
+export default function ControlPanel({ radius, intensity, opacity, boundaryOpacity, layerMode, onChange }) {
+  const smoothingHint =
+    layerMode === 'grid'
+      ? 'Structured grid: adjusts heatmap blur. Values are sampled at cell centers (subsampled on huge grids).'
+      : 'Heatmap mode: small values use a minimum blur so the grid does not break into separate dots.'
+
   return (
     <CardRoot className="bg-black/70 border border-white/15 backdrop-blur-md rounded-xl">
       <CardContent className="p-4 flex flex-col gap-5">
-        <SliderRow label="Smoothing Radius" unit="px"  min={2}   max={80}  step={1}   value={radius}          onChange={v => onChange('radius', v)} />
-        <SliderRow label="Intensity"        unit=""    min={0.1} max={4}   step={0.1} value={intensity}       onChange={v => onChange('intensity', v)} fmt={v=>v.toFixed(1)} />
+        <SliderRow
+          label="Smoothing Radius"
+          hint={smoothingHint}
+          unit="px"
+          min={2}
+          max={80}
+          step={0.5}
+          value={radius}
+          onChange={v => onChange('radius', v)}
+          fmt={v => v.toFixed(1)}
+        />
+        <SliderRow
+          label="Intensity"
+          unit=""
+          min={0.1}
+          max={4}
+          step={0.02}
+          value={intensity}
+          onChange={v => onChange('intensity', v)}
+          fmt={v => v.toFixed(2)}
+        />
         <SliderRow label="Layer Opacity"    unit="%"   min={10}  max={100} step={1}   value={opacity}         onChange={v => onChange('opacity', v)} />
         <SliderRow label="Boundary Opacity" unit="%"   min={0}   max={100} step={1}   value={boundaryOpacity} onChange={v => onChange('boundaryOpacity', v)} />
       </CardContent>
@@ -13,7 +37,7 @@ export default function ControlPanel({ radius, intensity, opacity, boundaryOpaci
   )
 }
 
-function SliderRow({ label, unit, min, max, step, value, onChange, fmt }) {
+function SliderRow({ label, hint, unit, min, max, step, value, onChange, fmt }) {
   const display = fmt ? fmt(value) : Math.round(value)
   return (
     <div className="flex flex-col gap-2">
@@ -21,6 +45,9 @@ function SliderRow({ label, unit, min, max, step, value, onChange, fmt }) {
         <span className="text-xs tracking-widest uppercase text-white/60">{label}</span>
         <span className="text-sm font-mono text-orange-300 tabular-nums">{display}{unit}</span>
       </div>
+      {hint ? (
+        <p className="text-[10px] leading-snug text-white/40 -mt-0.5">{hint}</p>
+      ) : null}
       <SliderRoot
         aria-label={label}
         minValue={min}

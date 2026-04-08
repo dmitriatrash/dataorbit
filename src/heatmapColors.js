@@ -1,3 +1,71 @@
+/** Matches `DEFAULT_CONTROLS.radius` in App — scales the zoom curve below. */
+export const HEATMAP_RADIUS_SLIDER_DEFAULT = 18
+
+/** Piecewise-linear curve for minimum blur (px) vs zoom — avoids dot-grid at low slider values. */
+const FLOOR_ZOOM_STOPS = /** @type {const} */ ([
+  [1, 9],
+  [2, 9],
+  [4, 10],
+  [6, 11],
+  [8, 12],
+  [10, 14],
+  [12, 16],
+  [14, 18],
+])
+
+/** Baseline blur curve (px) at slider = {@link HEATMAP_RADIUS_SLIDER_DEFAULT}. */
+const BASE_ZOOM_STOPS = /** @type {const} */ ([
+  [1, 26],
+  [2, 21],
+  [3, 19],
+  [4, 18],
+  [5, 17],
+  [6, 16],
+  [7, 15],
+  [8, 14],
+  [9, 13],
+  [10, 12],
+  [11, 11],
+  [12, 10],
+])
+
+function linearInterpZ(z, stops) {
+  if (z <= stops[0][0]) return stops[0][1]
+  if (z >= stops[stops.length - 1][0]) return stops[stops.length - 1][1]
+  for (let i = 0; i < stops.length - 1; i++) {
+    const [za, va] = stops[i]
+    const [zb, vb] = stops[i + 1]
+    if (z >= za && z <= zb) {
+      if (zb === za) return va
+      return va + ((z - za) / (zb - za)) * (vb - va)
+    }
+  }
+  return stops[stops.length - 1][1]
+}
+
+/**
+ * MapLibre heatmap blur is in pixels. Grid NetCDF points sit on a fixed lat/lon lattice; if the
+ * radius is smaller than on-screen spacing between neighbors, kernels do not overlap and you see
+ * a polka-dot grid. This keeps a zoom-dependent floor while scaling the slider around
+ * {@link HEATMAP_RADIUS_SLIDER_DEFAULT}.
+ *
+ * Implemented as a single `['interpolate',['linear'],['zoom'],…]` (no nested `max`/`*`).
+ * Compound expressions for `heatmap-radius` can fail or blank the map under **globe** projection
+ * in MapLibre GL JS 5.x.
+ */
+export function buildHeatmapRadiusExpression(userRadius) {
+  const scale = userRadius / HEATMAP_RADIUS_SLIDER_DEFAULT
+  /** @type {unknown[]} */
+  const expr = ['interpolate', ['linear'], ['zoom']]
+  for (let z = 1; z <= 14; z++) {
+    const floor = linearInterpZ(z, FLOOR_ZOOM_STOPS)
+    const base = linearInterpZ(z, BASE_ZOOM_STOPS)
+    const v = Math.max(floor, scale * base)
+    expr.push(z, Math.round(v * 1000) / 1000)
+  }
+  return expr
+}
+
 export const TICK_VALUES = [0, 100, 200, 300, 400, 500]
 
 export const TICK_COLORS = [

@@ -1,4 +1,5 @@
 import { useState, useReducer, useCallback } from 'react'
+import { Spinner } from '@heroui/react'
 import GlobeMap        from './GlobeMap'
 import UploadPanel     from './UploadPanel'
 import MapViewControls from './MapViewControls'
@@ -18,8 +19,8 @@ function controlsReducer(state, { key, value }) {
 }
 
 export default function App() {
-  const { status, geojson, meta, error, parse, reset } = useNetCDF()
   const [controls, dispatch] = useReducer(controlsReducer, DEFAULT_CONTROLS)
+  const { status, geojson, meta, error, parsingFileName, parse, reset } = useNetCDF()
   const [basemap, setBasemap] = useState('dark')
   const [viewMode, setViewMode] = useState('globe')
   const [showNaStateBorders, setShowNaStateBorders] = useState(false)
@@ -97,6 +98,7 @@ export default function App() {
           status={status}
           meta={meta}
           error={error}
+          parsingFileName={parsingFileName}
           onFile={parse}
           onReset={reset}
         />
@@ -114,6 +116,7 @@ export default function App() {
         {/* Controls — always visible */}
         <ControlPanel
           {...controls}
+          layerMode={meta?.layerMode}
           onChange={handleChange}
         />
 
@@ -132,6 +135,33 @@ export default function App() {
             <p className="text-sm tracking-widest uppercase text-white/35 font-mono max-w-md px-4">
               Upload a NetCDF file with latitude & longitude to explore the grid
             </p>
+          </div>
+        </div>
+      )}
+
+      {/* ── Loading: full-viewport feedback (map is empty until GeoJSON is ready) ── */}
+      {status === 'parsing' && showUiChrome && (
+        <div
+          className="absolute inset-0 flex items-center justify-center pointer-events-none z-[5]"
+          role="status"
+          aria-live="polite"
+          aria-busy="true"
+        >
+          <div className="flex flex-col items-center gap-4 rounded-2xl border border-orange-400/25 bg-black/75 backdrop-blur-md px-10 py-8 shadow-xl max-w-md mx-4">
+            <Spinner size="lg" color="warning" classNames={{ wrapper: 'w-10 h-10' }} />
+            <div className="text-center space-y-1">
+              <p className="text-sm tracking-widest uppercase text-orange-200/95 font-mono">
+                Loading dataset
+              </p>
+              {parsingFileName ? (
+                <p className="text-xs font-mono text-white/80 truncate max-w-[min(100%,280px)]" title={parsingFileName}>
+                  {parsingFileName}
+                </p>
+              ) : null}
+              <p className="text-[11px] tracking-wide text-white/50 max-w-xs leading-relaxed pt-1">
+                Reading the file and building the grid. Large files may take a little while.
+              </p>
+            </div>
           </div>
         </div>
       )}

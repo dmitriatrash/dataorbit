@@ -1,4 +1,12 @@
 import { useState, useCallback } from 'react'
+import { tryAlignedGridHeatmap } from './gridRaster'
+
+/**
+ * MapLibre heatmaps + huge GeoJSON Feature arrays exhaust JS/WebGL memory; Chrome may crash.
+ */
+const MAX_HEATMAP_FEATURES = 45_000
+/** Reading multi‑GB files into ArrayBuffer often crashes the tab before we can subsample. */
+const MAX_FILE_BYTES = 450 * 1024 * 1024
 
 function varLength(reader, name) {
   try {
@@ -64,14 +72,24 @@ export function useNetCDF() {
   const [geojson, setGeojson] = useState(null)
   const [meta,    setMeta]    = useState(null)
   const [error,   setError]   = useState(null)
+  const [parsingFileName, setParsingFileName] = useState(null)
 
   const parse = useCallback(async (file) => {
     setStatus('parsing')
+    setParsingFileName(file.name)
     setError(null)
     setGeojson(null)
     setMeta(null)
 
     try {
+      if (file.size > MAX_FILE_BYTES) {
+        throw new Error(
+          `This file is about ${(file.size / (1024 * 1024)).toFixed(0)} MB. ` +
+            'Loading very large NetCDF files in the browser often crashes the tab. ' +
+            'Try a smaller file, a single timestep, or crop the domain in another tool first.'
+        )
+      }
+
       const buffer = await file.arrayBuffer()
       const { NetCDFReader } = await import('netcdfjs')
       const reader = new NetCDFReader(buffer)
@@ -104,17 +122,48 @@ export function useNetCDF() {
       const N = latRaw.length
 
       const dataVarName = pickDataVariable(reader, varNames, latVarName, lonVarName, N)
-      const dataRaw = reader.getDataVariable(dataVarName)
       const dataVar = reader.variables.find(v => v.name === dataVarName)
       const fill = getAttrFirst(dataVar, '_FillValue', 'missing_value')
 
       const units = unitsString(dataVar) || '—'
-      const STEP = 6
+
+      const gridHeat = tryAlignedGridHeatmap(
+        reader,
+        latVarName,
+        lonVarName,
+        dataVarName,
+        fill,
+        MAX_HEATMAP_FEATURES,
+      )
+
+      if (gridHeat) {
+        setGeojson(gridHeat.geojson)
+        setMeta({
+          varName: dataVarName,
+          units,
+          minValue: gridHeat.minV,
+          maxValue: gridHeat.maxV,
+          pointCount: gridHeat.featureCount,
+          gridCellCount: gridHeat.gridCellCount,
+          subsampleStride: gridHeat.stride,
+          subsampled: gridHeat.stride > 1,
+          fileName: file.name,
+          layerMode: 'grid',
+          netcdfDims: gridHeat.netcdfDims,
+          gridSize: { ny: gridHeat.ny, nx: gridHeat.nx },
+        })
+        setParsingFileName(null)
+        setStatus('ready')
+        return
+      }
+
+      const dataRaw = reader.getDataVariable(dataVarName)
+      const stride = Math.max(1, Math.ceil(N / MAX_HEATMAP_FEATURES))
       const is2D = latRaw.length === N
 
       let minV = Infinity
       let maxV = -Infinity
-      for (let i = 0; i < N; i += STEP) {
+      for (let i = 0; i < N; i += stride) {
         const raw = dataRaw[i]
         if (isMissing(raw, fill)) continue
         if (raw < minV) minV = raw
@@ -127,7 +176,7 @@ export function useNetCDF() {
 
       const features = []
 
-      for (let i = 0; i < N; i += STEP) {
+      for (let i = 0; i < N; i += stride) {
         const raw = dataRaw[i]
         if (isMissing(raw, fill)) continue
 
@@ -145,7 +194,9 @@ export function useNetCDF() {
         })
       }
 
-      console.log(`[NetCDF] ${features.length} points, ${dataVarName} range ${minV.toPrecision(4)}…${maxV.toPrecision(4)} (${units})`)
+      console.log(
+        `[NetCDF] ${features.length} points (stride ${stride}, grid N=${N}), ${dataVarName} range ${minV.toPrecision(4)}…${maxV.toPrecision(4)} (${units})`
+      )
       setGeojson({ type: 'FeatureCollection', features })
       setMeta({
         varName: dataVarName,
@@ -153,19 +204,25 @@ export function useNetCDF() {
         minValue: minV,
         maxValue: maxV,
         pointCount: features.length,
+        gridCellCount: N,
+        subsampleStride: stride,
+        subsampled: stride > 1,
         fileName: file.name,
+        layerMode: 'heatmap',
       })
+      setParsingFileName(null)
       setStatus('ready')
     } catch (err) {
       console.error('[NetCDF] parse error:', err)
+      setParsingFileName(null)
       setError(err.message)
       setStatus('error')
     }
   }, [])
 
   const reset = useCallback(() => {
-    setStatus('idle'); setGeojson(null); setMeta(null); setError(null)
+    setStatus('idle'); setGeojson(null); setMeta(null); setError(null); setParsingFileName(null)
   }, [])
 
-  return { status, geojson, meta, error, parse, reset }
+  return { status, geojson, meta, error, parsingFileName, parse, reset }
 }

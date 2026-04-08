@@ -1,6 +1,6 @@
 import { useEffect, useRef, useCallback, useLayoutEffect } from 'react'
 import maplibregl from 'maplibre-gl'
-import { HEATMAP_COLOR_EXPR, HEATMAP_WEIGHT_EXPR } from './heatmapColors'
+import { HEATMAP_COLOR_EXPR, HEATMAP_WEIGHT_EXPR, buildHeatmapRadiusExpression } from './heatmapColors'
 import { BASEMAPS, boundaryOutlineColor, naStateLineColor } from './basemaps'
 import {
   NA_ADMIN1_SOURCE_ID,
@@ -48,7 +48,7 @@ export default function GlobeMap({
     const p = paintRef.current
     const op = p.boundaryOpacity / 100
     const outline = boundaryOutlineColor(p.basemap, op)
-    map.setPaintProperty(LAYER_ID, 'heatmap-radius',    p.radius)
+    map.setPaintProperty(LAYER_ID, 'heatmap-radius',    buildHeatmapRadiusExpression(p.radius))
     map.setPaintProperty(LAYER_ID, 'heatmap-intensity', p.intensity)
     map.setPaintProperty(LAYER_ID, 'heatmap-opacity',   p.opacity / 100)
     map.setPaintProperty('country-border', 'fill-outline-color', outline)
@@ -118,7 +118,7 @@ export default function GlobeMap({
             paint: {
               'heatmap-weight':     HEATMAP_WEIGHT_EXPR,
               'heatmap-intensity':  intensity,
-              'heatmap-radius':     radius,
+              'heatmap-radius':     buildHeatmapRadiusExpression(radius),
               'heatmap-opacity':    opacity / 100,
               'heatmap-color':      HEATMAP_COLOR_EXPR,
             },
@@ -155,7 +155,7 @@ export default function GlobeMap({
       },
       center: DEFAULT_MAP_VIEW.center,
       zoom: DEFAULT_MAP_VIEW.zoom,
-      projection: initialViewMode === 'globe' ? 'globe' : 'mercator',
+      projection: initialViewMode === 'globe' ? { type: 'globe' } : { type: 'mercator' },
       attributionControl: false,
     })
 
@@ -242,7 +242,7 @@ export default function GlobeMap({
   return (
     <div
       ref={containerRef}
-      className="absolute inset-0"
+      className="absolute inset-0 z-0 min-h-0 min-w-0"
       style={{ width:'100%', height:'100%' }}
     />
   )

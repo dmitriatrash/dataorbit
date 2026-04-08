@@ -1,7 +1,7 @@
 import { useCallback } from 'react'
 import { Button, CardRoot, CardContent, Spinner } from '@heroui/react'
 
-export default function UploadPanel({ status, meta, error, onFile, onReset }) {
+export default function UploadPanel({ status, meta, error, parsingFileName, onFile, onReset }) {
   const handleDrop = useCallback(e => {
     e.preventDefault()
     const file = e.dataTransfer?.files?.[0] || e.target?.files?.[0]
@@ -31,10 +31,27 @@ export default function UploadPanel({ status, meta, error, onFile, onReset }) {
           </p>
           <div className="grid grid-cols-2 gap-x-4 gap-y-1 mt-1">
             <Stat label="Variable" value={meta.varName.slice(0, 14)} />
-            <Stat label="Points"   value={meta.pointCount.toLocaleString()} />
+            <Stat
+              label="Points"
+              value={
+                meta.subsampled
+                  ? `${meta.pointCount.toLocaleString()} · grid ${meta.gridCellCount?.toLocaleString() ?? '—'}`
+                  : meta.pointCount.toLocaleString()
+              }
+            />
             <Stat label="Range"    value={`${meta.minValue.toPrecision(4)} … ${meta.maxValue.toPrecision(4)}`} />
             <Stat label="Units"    value={meta.units} />
           </div>
+          {meta.layerMode === 'grid' && meta.gridSize ? (
+            <p className="text-[10px] text-emerald-200/90 leading-snug mt-2 pt-2 border-t border-white/10">
+              Model grid {meta.gridSize.ny}×{meta.gridSize.nx}: heatmap uses cell-centered samples (MapLibre image layers are disabled — they distort curvilinear grids).
+            </p>
+          ) : null}
+          {meta.subsampled && meta.gridCellCount != null && meta.subsampleStride != null ? (
+            <p className="text-[10px] text-orange-200/85 leading-snug mt-2 pt-2 border-t border-white/10">
+              Large grid: every {meta.subsampleStride}th cell is drawn so the map stays within browser memory limits.
+            </p>
+          ) : null}
         </CardContent>
       </CardRoot>
     )
@@ -42,10 +59,18 @@ export default function UploadPanel({ status, meta, error, onFile, onReset }) {
 
   if (status === 'parsing') {
     return (
-      <CardRoot className="bg-black/70 border border-white/15 backdrop-blur-md rounded-xl">
-        <CardContent className="p-6 flex flex-col items-center gap-3">
-          <Spinner size="sm" />
-          <span className="text-xs tracking-widest uppercase text-white/60">Parsing NetCDF…</span>
+      <CardRoot className="bg-black/70 border border-orange-400/25 backdrop-blur-md rounded-xl">
+        <CardContent className="p-5 flex flex-col items-center gap-2 text-center">
+          <Spinner size="sm" color="warning" />
+          <span className="text-xs tracking-widest uppercase text-orange-200/90">Loading NetCDF…</span>
+          {parsingFileName ? (
+            <p className="text-[11px] font-mono text-white/75 truncate w-full" title={parsingFileName}>
+              {parsingFileName}
+            </p>
+          ) : null}
+          <p className="text-[10px] text-white/45 leading-snug">
+            Decoding variables and sampling the grid.
+          </p>
         </CardContent>
       </CardRoot>
     )
