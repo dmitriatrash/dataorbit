@@ -1,6 +1,6 @@
 import { useEffect, useRef, useCallback, useLayoutEffect } from 'react'
 import maplibregl from 'maplibre-gl'
-import { HEATMAP_COLOR_EXPR, HEATMAP_WEIGHT_EXPR, buildHeatmapRadiusExpression } from './heatmapColors'
+import { HEATMAP_COLOR_EXPR, HEATMAP_WEIGHT_EXPR, getHeatmapRadiusAtZoom } from './heatmapColors'
 import { BASEMAPS, boundaryOutlineColor, naStateLineColor } from './basemaps'
 import {
   NA_ADMIN1_SOURCE_ID,
@@ -26,33 +26,71 @@ export const DEFAULT_MAP_VIEW = {
 export default function GlobeMap({
   geojson,
   radius,
+  detailBoost,
+  noSmoothing = false,
   intensity,
   opacity,
   boundaryOpacity,
   basemap = 'dark',
   viewMode = 'globe',
   showNaStateBorders = false,
+  gridMetrics,
   resetSignal = 0,
+  /** Fired when the map is ready (and null on teardown). Used to coordinate UI scroll vs map wheel-zoom. */
+  onMapReady,
 }) {
   const containerRef = useRef(null)
   const mapRef       = useRef(null)
   const loadedRef    = useRef(false)
-  const paintRef = useRef({ radius, intensity, opacity, boundaryOpacity, basemap })
+  const onMapReadyRef = useRef(onMapReady)
+  onMapReadyRef.current = onMapReady
+  const paintRef = useRef({ radius, detailBoost, noSmoothing, intensity, opacity, boundaryOpacity, basemap })
   const viewRef = useRef({ basemap, viewMode })
+  const gridRef = useRef(gridMetrics)
   useLayoutEffect(() => {
-    paintRef.current = { radius, intensity, opacity, boundaryOpacity, basemap }
+    paintRef.current = { radius, detailBoost, noSmoothing, intensity, opacity, boundaryOpacity, basemap }
     viewRef.current = { basemap, viewMode }
-  }, [radius, intensity, opacity, boundaryOpacity, basemap, viewMode])
+    gridRef.current = gridMetrics
+  }, [radius, detailBoost, noSmoothing, intensity, opacity, boundaryOpacity, basemap, viewMode, gridMetrics])
+
+  const computeGridMinRadius = useCallback((map, detail) => {
+    const metrics = gridRef.current
+    if (!metrics) return null
+    const { centerLat, centerLon, stepLatDeg, stepLonDeg } = metrics
+    if (!Number.isFinite(centerLat) || !Number.isFinite(centerLon)) return null
+    if (!Number.isFinite(stepLatDeg) || !Number.isFinite(stepLonDeg)) return null
+    const base = map.project([centerLon, centerLat])
+    const pxLon = map.project([centerLon + stepLonDeg, centerLat])
+    const pxLat = map.project([centerLon, centerLat + stepLatDeg])
+    const dx = Math.hypot(pxLon.x - base.x, pxLon.y - base.y)
+    const dy = Math.hypot(pxLat.x - base.x, pxLat.y - base.y)
+    const spacing = Math.max(dx, dy)
+    if (!Number.isFinite(spacing) || spacing <= 0) return null
+    const overlap = Math.max(0.18, 0.82 * (1 - detail * 0.78))
+    const min = spacing * overlap
+    return Math.max(2, Math.min(60, min))
+  }, [])
+
+  const computeRadiusAtZoom = useCallback((map) => {
+    const p = paintRef.current
+    if (p.noSmoothing) {
+      return Math.max(1, p.radius)
+    }
+    const z = map.getZoom()
+    const base = getHeatmapRadiusAtZoom(p.radius, p.detailBoost, z)
+    const minFromGrid = computeGridMinRadius(map, Math.min(1, Math.max(0, p.detailBoost)))
+    return minFromGrid ? Math.max(base, minFromGrid) : base
+  }, [computeGridMinRadius])
 
   const applyHeatAndBoundary = useCallback((map) => {
     const p = paintRef.current
     const op = p.boundaryOpacity / 100
     const outline = boundaryOutlineColor(p.basemap, op)
-    map.setPaintProperty(LAYER_ID, 'heatmap-radius',    buildHeatmapRadiusExpression(p.radius))
+    map.setPaintProperty(LAYER_ID, 'heatmap-radius',    computeRadiusAtZoom(map))
     map.setPaintProperty(LAYER_ID, 'heatmap-intensity', p.intensity)
     map.setPaintProperty(LAYER_ID, 'heatmap-opacity',   p.opacity / 100)
     map.setPaintProperty('country-border', 'fill-outline-color', outline)
-  }, [])
+  }, [computeRadiusAtZoom])
 
   const applyBasemap = useCallback((map, basemapId) => {
     const cfg = BASEMAPS[basemapId]
@@ -118,7 +156,7 @@ export default function GlobeMap({
             paint: {
               'heatmap-weight':     HEATMAP_WEIGHT_EXPR,
               'heatmap-intensity':  intensity,
-              'heatmap-radius':     buildHeatmapRadiusExpression(radius),
+              'heatmap-radius':     getHeatmapRadiusAtZoom(radius, detailBoost, DEFAULT_MAP_VIEW.zoom, { noSmoothing }),
               'heatmap-opacity':    opacity / 100,
               'heatmap-color':      HEATMAP_COLOR_EXPR,
             },
@@ -167,10 +205,16 @@ export default function GlobeMap({
       applyBasemap(map, viewRef.current.basemap)
       applyProjection(map, viewRef.current.viewMode)
       applyHeatAndBoundary(map)
+      onMapReadyRef.current?.(map)
     })
 
     mapRef.current = map
-    return () => { map.remove(); mapRef.current = null; loadedRef.current = false }
+    return () => {
+      onMapReadyRef.current?.(null)
+      map.remove()
+      mapRef.current = null
+      loadedRef.current = false
+    }
     // Single map instance; heatmap defaults are refreshed by applyHeatAndBoundary effect.
   }, [applyHeatAndBoundary, applyBasemap, applyProjection]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -211,7 +255,30 @@ export default function GlobeMap({
     const map = mapRef.current
     if (!map || !loadedRef.current) return
     applyHeatAndBoundary(map)
-  }, [radius, intensity, opacity, boundaryOpacity, basemap, applyHeatAndBoundary])
+  }, [radius, detailBoost, noSmoothing, intensity, opacity, boundaryOpacity, basemap, applyHeatAndBoundary])
+
+  // ── Keep heatmap radius in sync with zoom ─────────────────────────────────
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !loadedRef.current) return
+    let raf = 0
+    const applyRadius = () => {
+      raf = 0
+      const m = mapRef.current
+      if (!m || !loadedRef.current) return
+      m.setPaintProperty(LAYER_ID, 'heatmap-radius', computeRadiusAtZoom(m))
+    }
+    const onZoom = () => {
+      if (raf) return
+      raf = requestAnimationFrame(applyRadius)
+    }
+    onZoom()
+    map.on('zoom', onZoom)
+    return () => {
+      map.off('zoom', onZoom)
+      if (raf) cancelAnimationFrame(raf)
+    }
+  }, [computeRadiusAtZoom])
 
   // ── N. America state/province lines (all basemaps, opt-in) ─────────────────
   useEffect(() => {

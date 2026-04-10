@@ -1,10 +1,10 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { tryAlignedGridHeatmap } from './gridRaster'
 
 /**
  * MapLibre heatmaps + huge GeoJSON Feature arrays exhaust JS/WebGL memory; Chrome may crash.
  */
-const MAX_HEATMAP_FEATURES = 45_000
+const DEFAULT_MAX_HEATMAP_FEATURES = 45_000
 /** Reading multi‑GB files into ArrayBuffer often crashes the tab before we can subsample. */
 const MAX_FILE_BYTES = 450 * 1024 * 1024
 
@@ -67,14 +67,17 @@ function pickDataVariable(reader, varNames, latVarName, lonVarName, gridLen) {
   return matched[0]
 }
 
-export function useNetCDF() {
+export function useNetCDF({ maxHeatmapFeatures = DEFAULT_MAX_HEATMAP_FEATURES } = {}) {
   const [status, setStatus]   = useState('idle')
   const [geojson, setGeojson] = useState(null)
   const [meta,    setMeta]    = useState(null)
   const [error,   setError]   = useState(null)
   const [parsingFileName, setParsingFileName] = useState(null)
+  const lastFileRef = useRef(null)
+  const lastMaxRef = useRef(maxHeatmapFeatures)
 
   const parse = useCallback(async (file) => {
+    lastFileRef.current = file
     setStatus('parsing')
     setParsingFileName(file.name)
     setError(null)
@@ -82,6 +85,7 @@ export function useNetCDF() {
     setMeta(null)
 
     try {
+      const maxFeatures = Math.max(10_000, Math.min(500_000, Math.round(maxHeatmapFeatures)))
       if (file.size > MAX_FILE_BYTES) {
         throw new Error(
           `This file is about ${(file.size / (1024 * 1024)).toFixed(0)} MB. ` +
@@ -133,7 +137,7 @@ export function useNetCDF() {
         lonVarName,
         dataVarName,
         fill,
-        MAX_HEATMAP_FEATURES,
+        maxFeatures,
       )
 
       if (gridHeat) {
@@ -147,10 +151,12 @@ export function useNetCDF() {
           gridCellCount: gridHeat.gridCellCount,
           subsampleStride: gridHeat.stride,
           subsampled: gridHeat.stride > 1,
+          maxHeatmapFeatures: maxFeatures,
           fileName: file.name,
           layerMode: 'grid',
           netcdfDims: gridHeat.netcdfDims,
           gridSize: { ny: gridHeat.ny, nx: gridHeat.nx },
+          gridMetrics: gridHeat.gridMetrics,
         })
         setParsingFileName(null)
         setStatus('ready')
@@ -158,7 +164,7 @@ export function useNetCDF() {
       }
 
       const dataRaw = reader.getDataVariable(dataVarName)
-      const stride = Math.max(1, Math.ceil(N / MAX_HEATMAP_FEATURES))
+      const stride = Math.max(1, Math.ceil(N / maxFeatures))
       const is2D = latRaw.length === N
 
       let minV = Infinity
@@ -207,6 +213,7 @@ export function useNetCDF() {
         gridCellCount: N,
         subsampleStride: stride,
         subsampled: stride > 1,
+        maxHeatmapFeatures: maxFeatures,
         fileName: file.name,
         layerMode: 'heatmap',
       })
@@ -218,7 +225,16 @@ export function useNetCDF() {
       setError(err.message)
       setStatus('error')
     }
-  }, [])
+  }, [maxHeatmapFeatures])
+
+  useEffect(() => {
+    if (lastMaxRef.current === maxHeatmapFeatures) return
+    lastMaxRef.current = maxHeatmapFeatures
+    const last = lastFileRef.current
+    if (!last) return
+    if (status === 'parsing') return
+    parse(last)
+  }, [maxHeatmapFeatures, parse, status])
 
   const reset = useCallback(() => {
     setStatus('idle'); setGeojson(null); setMeta(null); setError(null); setParsingFileName(null)

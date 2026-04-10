@@ -101,6 +101,64 @@ export function buildSubsampledGridGeoJSON(
   return { type: 'FeatureCollection', features }
 }
 
+function median(values) {
+  if (!values.length) return null
+  const sorted = values.slice().sort((a, b) => a - b)
+  const mid = Math.floor(sorted.length / 2)
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2
+}
+
+function wrapLonDelta(d) {
+  const ad = Math.abs(d)
+  return ad > 180 ? 360 - ad : ad
+}
+
+export function estimateGridMetrics(latFlat, lonFlat, ny, nx) {
+  if (!latFlat || !lonFlat || ny < 2 || nx < 2) return null
+  const samples = Math.max(100, Math.min(1200, Math.floor((ny * nx) / 500)))
+  const stepY = Math.max(1, Math.floor(ny / Math.sqrt(samples)))
+  const stepX = Math.max(1, Math.floor(nx / Math.sqrt(samples)))
+  const latSteps = []
+  const lonSteps = []
+  for (let y = 0; y < ny - 1; y += stepY) {
+    const row = y * nx
+    for (let x = 0; x < nx - 1; x += stepX) {
+      const i = row + x
+      const lat = latFlat[i]
+      const lon = lonFlat[i]
+      const latR = latFlat[i + 1]
+      const lonR = lonFlat[i + 1]
+      const latD = latFlat[i + nx]
+      const lonD = lonFlat[i + nx]
+      if (Number.isFinite(lat) && Number.isFinite(latR)) {
+        const dLat = Math.abs(latR - lat)
+        if (dLat > 0) latSteps.push(dLat)
+      }
+      if (Number.isFinite(lon) && Number.isFinite(lonR)) {
+        const dLon = wrapLonDelta(lonR - lon)
+        if (dLon > 0) lonSteps.push(dLon)
+      }
+      if (Number.isFinite(lat) && Number.isFinite(latD)) {
+        const dLat = Math.abs(latD - lat)
+        if (dLat > 0) latSteps.push(dLat)
+      }
+      if (Number.isFinite(lon) && Number.isFinite(lonD)) {
+        const dLon = wrapLonDelta(lonD - lon)
+        if (dLon > 0) lonSteps.push(dLon)
+      }
+    }
+  }
+  const stepLatDeg = median(latSteps)
+  const stepLonDeg = median(lonSteps)
+  const midIndex = Math.floor(ny / 2) * nx + Math.floor(nx / 2)
+  let centerLat = latFlat[midIndex]
+  let centerLon = lonFlat[midIndex]
+  if (centerLon > 180) centerLon -= 360
+  if (!Number.isFinite(centerLat) || !Number.isFinite(centerLon)) return null
+  if (!Number.isFinite(stepLatDeg) || !Number.isFinite(stepLonDeg)) return null
+  return { centerLat, centerLon, stepLatDeg, stepLonDeg }
+}
+
 /**
  * If lat/lon/data share a regular 2D (or time×2D) grid, build a capped heatmap FeatureCollection.
  * @returns {{
@@ -111,6 +169,7 @@ export function buildSubsampledGridGeoJSON(
  *   nx: number,
  *   stride: number,
  *   netcdfDims: number[],
+ *   gridMetrics: { centerLat: number, centerLon: number, stepLatDeg: number, stepLonDeg: number } | null,
  * } | null}
  */
 export function tryAlignedGridHeatmap(reader, latVarName, lonVarName, dataVarName, fill, maxFeatures = 45_000) {
@@ -159,6 +218,7 @@ export function tryAlignedGridHeatmap(reader, latVarName, lonVarName, dataVarNam
   )
 
   const netcdfDims = latMeta.dimensions.map(id => reader.dimensions[id].size)
+  const gridMetrics = estimateGridMetrics(latFlat, lonFlat, ny, nx)
 
   return {
     geojson,
@@ -168,6 +228,7 @@ export function tryAlignedGridHeatmap(reader, latVarName, lonVarName, dataVarNam
     nx,
     stride,
     netcdfDims,
+    gridMetrics,
     featureCount: geojson.features.length,
     gridCellCount,
   }

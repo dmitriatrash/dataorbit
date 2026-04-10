@@ -47,21 +47,41 @@ function linearInterpZ(z, stops) {
  * MapLibre heatmap blur is in pixels. Grid NetCDF points sit on a fixed lat/lon lattice; if the
  * radius is smaller than on-screen spacing between neighbors, kernels do not overlap and you see
  * a polka-dot grid. This keeps a zoom-dependent floor while scaling the slider around
- * {@link HEATMAP_RADIUS_SLIDER_DEFAULT}.
+ * {@link HEATMAP_RADIUS_SLIDER_DEFAULT}. `detailBoost` lowers the floor at higher zooms while
+ * keeping a minimum blur to avoid banding/circle artifacts.
  *
  * Implemented as a single `['interpolate',['linear'],['zoom'],…]` (no nested `max`/`*`).
  * Compound expressions for `heatmap-radius` can fail or blank the map under **globe** projection
  * in MapLibre GL JS 5.x.
  */
-export function buildHeatmapRadiusExpression(userRadius) {
+/**
+ * @param {{ noSmoothing?: boolean }} [opts]
+ */
+export function getHeatmapRadiusAtZoom(userRadius, detailBoost, zoom, opts) {
+  if (opts?.noSmoothing) {
+    const r = Math.max(1, userRadius)
+    return Math.round(r * 1000) / 1000
+  }
   const scale = userRadius / HEATMAP_RADIUS_SLIDER_DEFAULT
+  const detail = Math.min(1, Math.max(0, detailBoost))
+  const z = Math.min(14, Math.max(1, zoom))
+  // Detail boost must apply at all zooms (previous (z-4)/8 made it a no-op below ~zoom 4).
+  const zoomT = Math.min(1, Math.max(0, (z - 1) / 12))
+  const floorScale = 1 - detail * (0.45 + 0.35 * zoomT)
+  const baseScale = 1 - detail * (0.3 + 0.25 * zoomT)
+  const floorBase = linearInterpZ(z, FLOOR_ZOOM_STOPS)
+  const base = linearInterpZ(z, BASE_ZOOM_STOPS)
+  const minFloor = Math.max(3, (6 + (1 - zoomT) * 2) * (1 - detail * 0.65))
+  const floor = Math.max(minFloor, floorBase * floorScale)
+  const v = Math.max(floor, scale * base * baseScale)
+  return Math.round(v * 1000) / 1000
+}
+
+export function buildHeatmapRadiusExpression(userRadius, detailBoost = 0, opts) {
   /** @type {unknown[]} */
   const expr = ['interpolate', ['linear'], ['zoom']]
   for (let z = 1; z <= 14; z++) {
-    const floor = linearInterpZ(z, FLOOR_ZOOM_STOPS)
-    const base = linearInterpZ(z, BASE_ZOOM_STOPS)
-    const v = Math.max(floor, scale * base)
-    expr.push(z, Math.round(v * 1000) / 1000)
+    expr.push(z, getHeatmapRadiusAtZoom(userRadius, detailBoost, z, opts))
   }
   return expr
 }
