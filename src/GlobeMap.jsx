@@ -8,20 +8,13 @@ import {
   NATURAL_EARTH_ADMIN1_GEOJSON,
   NA_ADMIN1_FILTER,
 } from './naStateBoundaries'
+import { DEFAULT_MAP_VIEW } from './mapViewDefaults'
 
 const SOURCE_ID = 'nc-data'
 const LAYER_ID  = 'nc-heatmap'
 const BASEMAP_SOURCE_ID = 'basemap'
 
 const EMPTY_FC = { type:'FeatureCollection', features:[] }
-
-/** Matches initial map camera; used by reset control. */
-export const DEFAULT_MAP_VIEW = {
-  center: [-95, 52],
-  zoom: 2.6,
-  bearing: 0,
-  pitch: 0,
-}
 
 export default function GlobeMap({
   geojson,
@@ -43,15 +36,15 @@ export default function GlobeMap({
   const mapRef       = useRef(null)
   const loadedRef    = useRef(false)
   const onMapReadyRef = useRef(onMapReady)
-  onMapReadyRef.current = onMapReady
   const paintRef = useRef({ radius, detailBoost, noSmoothing, intensity, opacity, boundaryOpacity, basemap })
-  const viewRef = useRef({ basemap, viewMode })
-  const gridRef = useRef(gridMetrics)
+  const viewRef       = useRef({ basemap, viewMode, showNaStateBorders })
+  const gridRef       = useRef(gridMetrics)
   useLayoutEffect(() => {
+    onMapReadyRef.current = onMapReady
     paintRef.current = { radius, detailBoost, noSmoothing, intensity, opacity, boundaryOpacity, basemap }
-    viewRef.current = { basemap, viewMode }
+    viewRef.current = { basemap, viewMode, showNaStateBorders }
     gridRef.current = gridMetrics
-  }, [radius, detailBoost, noSmoothing, intensity, opacity, boundaryOpacity, basemap, viewMode, gridMetrics])
+  }, [radius, detailBoost, noSmoothing, intensity, opacity, boundaryOpacity, basemap, viewMode, showNaStateBorders, gridMetrics, onMapReady])
 
   const computeGridMinRadius = useCallback((map, detail) => {
     const metrics = gridRef.current
@@ -109,6 +102,12 @@ export default function GlobeMap({
     if (!globe) {
       map.easeTo({ pitch: 0, duration: 500, essential: true })
     }
+  }, [])
+
+  const applyNaStateBorders = useCallback((map, visible, basemapId) => {
+    if (!map.getLayer(NA_STATE_LAYER_ID)) return
+    map.setLayoutProperty(NA_STATE_LAYER_ID, 'visibility', visible ? 'visible' : 'none')
+    map.setPaintProperty(NA_STATE_LAYER_ID, 'line-color', naStateLineColor(basemapId))
   }, [])
 
   // ── Init map once (first-render basemap / viewMode only for style snapshot) ─
@@ -204,6 +203,7 @@ export default function GlobeMap({
       loadedRef.current = true
       applyBasemap(map, viewRef.current.basemap)
       applyProjection(map, viewRef.current.viewMode)
+      applyNaStateBorders(map, viewRef.current.showNaStateBorders, viewRef.current.basemap)
       applyHeatAndBoundary(map)
       onMapReadyRef.current?.(map)
     })
@@ -216,7 +216,7 @@ export default function GlobeMap({
       loadedRef.current = false
     }
     // Single map instance; heatmap defaults are refreshed by applyHeatAndBoundary effect.
-  }, [applyHeatAndBoundary, applyBasemap, applyProjection]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [applyHeatAndBoundary, applyBasemap, applyProjection, applyNaStateBorders]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Update GeoJSON data when it changes ────────────────────────────────────
   const updateData = useCallback(() => {
@@ -283,10 +283,9 @@ export default function GlobeMap({
   // ── N. America state/province lines (all basemaps, opt-in) ─────────────────
   useEffect(() => {
     const map = mapRef.current
-    if (!map || !loadedRef.current || !map.getLayer(NA_STATE_LAYER_ID)) return
-    map.setLayoutProperty(NA_STATE_LAYER_ID, 'visibility', showNaStateBorders ? 'visible' : 'none')
-    map.setPaintProperty(NA_STATE_LAYER_ID, 'line-color', naStateLineColor(basemap))
-  }, [basemap, showNaStateBorders])
+    if (!map || !loadedRef.current) return
+    applyNaStateBorders(map, showNaStateBorders, basemap)
+  }, [basemap, showNaStateBorders, applyNaStateBorders])
 
   // ── Reset camera to default (triggered from UI) ───────────────────────────
   useEffect(() => {

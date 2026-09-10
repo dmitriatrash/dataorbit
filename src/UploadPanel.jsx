@@ -1,125 +1,222 @@
-import { useCallback } from 'react'
-import { Button, CardRoot, CardContent, Spinner } from '@heroui/react'
+import { useCallback, useId, useRef, useState } from 'react'
+import { Button, Spinner } from '@heroui/react'
+import { parseNetcdfUrl } from './netcdfUrl'
 
-export default function UploadPanel({ status, meta, error, parsingFileName, onFile, onReset }) {
-  const handleDrop = useCallback(e => {
-    e.preventDefault()
-    const file = e.dataTransfer?.files?.[0] || e.target?.files?.[0]
+export default function UploadPanel({ status, meta, error, parsingFileName, onFile, onVariableChange, onReset }) {
+  const inputId = useId()
+  const urlFieldId = useId()
+  const inputRef = useRef(null)
+  const [isDragging, setIsDragging] = useState(false)
+  const [url, setUrl] = useState('')
+  const [urlError, setUrlError] = useState(null)
+
+  const acceptFile = useCallback((file) => {
     if (file) onFile(file)
   }, [onFile])
 
-  const handleClick = useCallback(() => {
-    const input = document.createElement('input')
-    input.type = 'file'
-    input.accept = '.nc,.nc4,.netcdf'
-    input.onchange = e => { if (e.target.files[0]) onFile(e.target.files[0]) }
-    input.click()
+  const submitUrl = useCallback((raw) => {
+    const value = String(raw ?? '').trim()
+    setUrl(value)
+    if (!value) {
+      setUrlError('Paste a URL to a .nc, .nc4, or .netcdf file.')
+      return
+    }
+    try {
+      parseNetcdfUrl(value)
+      setUrlError(null)
+      onFile(value)
+    } catch (err) {
+      setUrlError(err.message)
+    }
   }, [onFile])
+
+  const handleInput = useCallback((event) => {
+    acceptFile(event.target.files?.[0])
+    event.target.value = ''
+  }, [acceptFile])
+
+  const handleDrop = useCallback((event) => {
+    event.preventDefault()
+    setIsDragging(false)
+    const file = event.dataTransfer.files?.[0]
+    if (file) {
+      acceptFile(file)
+      return
+    }
+    const uri = (event.dataTransfer.getData('text/uri-list') || event.dataTransfer.getData('text/plain'))
+      .split('\n')
+      .map((line) => line.trim())
+      .find((line) => line && !line.startsWith('#') && /^https?:\/\//i.test(line))
+    if (uri) submitUrl(uri)
+  }, [acceptFile, submitUrl])
+
+  const handlePaste = useCallback((event) => {
+    const text = event.clipboardData?.getData('text/plain')?.trim()
+    if (!text || !/^https?:\/\//i.test(text)) return
+    event.preventDefault()
+    submitUrl(text)
+  }, [submitUrl])
+
+  const openPicker = useCallback(() => {
+    inputRef.current?.click()
+  }, [])
+
+  const urlField = (
+    <DatasetUrlField
+      id={urlFieldId}
+      url={url}
+      error={urlError}
+      onChange={(value) => {
+        setUrl(value)
+        if (urlError) setUrlError(null)
+      }}
+      onSubmit={submitUrl}
+      onPaste={handlePaste}
+    />
+  )
+
+  const fileInput = (
+    <input
+      ref={inputRef}
+      id={inputId}
+      className="dataorbit-file-input"
+      type="file"
+      accept=".nc,.nc4,.netcdf"
+      onChange={handleInput}
+    />
+  )
 
   if (status === 'ready' && meta) {
     return (
-      <CardRoot className="shrink-0 overflow-visible bg-black/70 border border-white/15 backdrop-blur-md rounded-xl">
-        <CardContent className="p-4 pb-3.5 flex flex-col gap-2 overflow-visible min-w-0">
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-xs tracking-widest uppercase text-white/60">Active Dataset</span>
-            <button onClick={onReset} className="text-xs tracking-widest uppercase text-orange-300 hover:text-orange-200 transition-colors shrink-0">
-              ✕ Clear
-            </button>
+      <div className="dataset-panel dataset-panel--ready">
+        <div className="dataset-file-row">
+          <span className="dataset-file-row__label">Loaded file</span>
+          <Button size="sm" variant="light" onPress={onReset} className="drawer-quiet-button">Replace</Button>
+        </div>
+        <p className="dataset-file-name" title={meta.fileName}>{meta.fileName}</p>
+        {meta.availableVariables?.length > 1 ? (
+          <div className="dataset-variable-field">
+            <label htmlFor="dataset-variable">{meta.variableKind === 'channel' ? 'Satellite channel' : 'Variable'}</label>
+            <select id="dataset-variable" value={meta.varName} onChange={(event) => onVariableChange?.(event.target.value)}>
+              {meta.availableVariables.map((variable) => (
+                <option key={variable.name} value={variable.name}>
+                  {variable.name}{variable.units && variable.units !== '—' ? ` · ${variable.units}` : ''}
+                </option>
+              ))}
+            </select>
           </div>
-          <p className="text-sm text-white/90 font-mono break-all leading-snug" title={meta.fileName}>
-            {meta.fileName}
-          </p>
-          <div className="grid grid-cols-2 gap-x-4 gap-y-2 mt-1 min-w-0">
-            <Stat label="Variable" value={meta.varName} />
-            <Stat
-              label="Points"
-              value={
-                meta.subsampled
-                  ? `${meta.pointCount.toLocaleString()} · grid ${meta.gridCellCount?.toLocaleString() ?? '—'}`
-                  : meta.pointCount.toLocaleString()
-              }
-            />
-            <Stat label="Range"    value={`${meta.minValue.toPrecision(4)} … ${meta.maxValue.toPrecision(4)}`} />
-            <Stat label="Units"    value={meta.units} />
-          </div>
-          {meta.layerMode === 'grid' && meta.gridSize ? (
-            <p className="text-[10px] text-emerald-200/90 leading-relaxed mt-2 pt-2 border-t border-white/10">
-              Model grid {meta.gridSize.ny}×{meta.gridSize.nx}: heatmap uses cell-centered samples (MapLibre image layers are disabled — they distort curvilinear grids).
-            </p>
-          ) : null}
-          {meta.subsampled && meta.gridCellCount != null && meta.subsampleStride != null ? (
-            <p className="text-[10px] text-orange-200/85 leading-relaxed mt-2 pt-2 border-t border-white/10 pb-0.5">
-              Large grid: every {meta.subsampleStride}th cell is drawn (max {meta.maxHeatmapFeatures?.toLocaleString() ?? '—'} points).
-            </p>
-          ) : null}
-        </CardContent>
-      </CardRoot>
+        ) : null}
+        <dl className="dataset-readout">
+          <Readout label="Variable" value={meta.varName} />
+          <Readout label="Units" value={meta.units} />
+          <Readout label="Source range" value={`${formatValue(meta.minValue)} — ${formatValue(meta.maxValue)}`} accent />
+          <Readout label="Points" value={meta.subsampled ? `${meta.pointCount.toLocaleString()} / ${meta.gridCellCount?.toLocaleString() ?? '—'}` : meta.pointCount.toLocaleString()} />
+        </dl>
+        {meta.layerMode === 'grid' && meta.gridSize ? (
+          <p className="dataset-note dataset-note--success">Model grid {meta.gridSize.ny} × {meta.gridSize.nx}. Heatmap uses cell-centered samples.</p>
+        ) : null}
+        {meta.subsampled && meta.gridCellCount != null && meta.subsampleStride != null ? (
+          <p className="dataset-note dataset-note--warning">A {meta.subsampleStride}-cell stride keeps rendering within the {meta.maxHeatmapFeatures?.toLocaleString() ?? 'current'} point budget.</p>
+        ) : null}
+      </div>
     )
   }
 
   if (status === 'parsing') {
     return (
-      <CardRoot className="bg-black/70 border border-orange-400/25 backdrop-blur-md rounded-xl">
-        <CardContent className="p-5 flex flex-col items-center gap-2 text-center">
-          <Spinner size="sm" color="warning" />
-          <span className="text-xs tracking-widest uppercase text-orange-200/90">Loading NetCDF…</span>
-          {parsingFileName ? (
-            <p className="text-[11px] font-mono text-white/75 truncate w-full" title={parsingFileName}>
-              {parsingFileName}
-            </p>
-          ) : null}
-          <p className="text-[10px] text-white/45 leading-snug">
-            Decoding variables and sampling the grid.
-          </p>
-        </CardContent>
-      </CardRoot>
+      <div className="dataset-state dataset-state--parsing" role="status" aria-live="polite" aria-busy="true">
+        <Spinner size="sm" color="warning" />
+        <div>
+          <strong>Reading variables and sampling the grid.</strong>
+          {parsingFileName ? <p title={parsingFileName}>{parsingFileName}</p> : null}
+        </div>
+      </div>
     )
   }
 
   if (status === 'error') {
     return (
-      <CardRoot className="bg-black/60 border border-red-500/30 backdrop-blur-md rounded-xl">
-        <CardContent className="p-4 flex flex-col gap-2">
-          <span className="text-xs tracking-widest uppercase text-red-400">Parse Error</span>
-          <p className="text-xs text-red-200/90 font-mono leading-relaxed">{error}</p>
-          <Button size="sm" variant="outline" onPress={onReset} className="mt-1 text-xs tracking-widest uppercase text-red-300 border-red-500/50">
-            Try Again
-          </Button>
-        </CardContent>
-      </CardRoot>
+      <div className="dataset-state dataset-state--error" role="alert">
+        <p className="dataset-state__error-title">Couldn’t read file</p>
+        <p className="dataset-state__error-copy">{error}</p>
+        <div className="dataset-state__actions">
+          <Button size="sm" color="danger" variant="flat" onPress={openPicker}>Choose another file</Button>
+          <Button size="sm" variant="light" onPress={onReset} className="drawer-quiet-button">Clear</Button>
+        </div>
+        {fileInput}
+        {urlField}
+      </div>
     )
   }
 
   return (
-    <CardRoot className="shrink-0 overflow-visible bg-black/70 border border-white/15 backdrop-blur-md rounded-xl">
-      <CardContent className="p-3 pb-3.5 overflow-visible min-w-0">
-        <div
-          role="button"
-          tabIndex={0}
-          aria-label="Upload NetCDF file"
-          onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleClick() } }}
-          onDrop={handleDrop}
-          onDragOver={e => e.preventDefault()}
-          onClick={handleClick}
-          className="border border-dashed border-white/25 rounded-lg px-5 py-5 flex flex-col items-center gap-2 cursor-pointer hover:border-orange-400/55 hover:bg-orange-400/5 transition-all duration-200"
-        >
-          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-white/25">
-            <path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"/>
-            <path d="M12 12v9m-3-3 3 3 3-3"/>
-          </svg>
-          <span className="text-xs tracking-widest uppercase text-white/65 text-center">Drop NetCDF file</span>
-          <span className="text-[11px] text-white/45">.nc · .nc4 · .netcdf</span>
-        </div>
-      </CardContent>
-    </CardRoot>
+    <div className="dataset-state dataset-state--idle">
+      {fileInput}
+      <label
+        htmlFor={inputId}
+        className={`dataset-dropzone ${isDragging ? 'is-dragging' : ''}`}
+        onDrop={handleDrop}
+        onDragEnter={() => setIsDragging(true)}
+        onDragOver={(event) => event.preventDefault()}
+        onDragLeave={(event) => {
+          if (event.currentTarget === event.target) setIsDragging(false)
+        }}
+      >
+        <i className="ti ti-file-upload" aria-hidden="true" />
+        <span>Drop a NetCDF file</span>
+        <small>.nc · .nc4 · .netcdf</small>
+      </label>
+      <Button fullWidth color="warning" variant="solid" onPress={openPicker} className="drawer-primary-button">Choose file</Button>
+      <div className="dataset-or" role="separator" aria-label="or">or</div>
+      {urlField}
+      <p className="dataset-helper">Expected latitude/longitude coordinates and a numeric field.</p>
+    </div>
   )
 }
 
-function Stat({ label, value }) {
+function DatasetUrlField({ id, url, error, onChange, onSubmit, onPaste }) {
   return (
-    <div className="flex flex-col gap-0.5 min-w-0">
-      <span className="text-[11px] tracking-widest uppercase text-white/55">{label}</span>
-      <span className="text-xs font-mono text-white/85 break-words [overflow-wrap:anywhere] leading-snug">{value}</span>
+    <div className="dataset-url">
+      <label htmlFor={id}>Paste a file URL</label>
+      <div className="dataset-url__row">
+        <input
+          id={id}
+          type="url"
+          inputMode="url"
+          autoComplete="off"
+          spellCheck="false"
+          placeholder="https://example.com/grid.nc"
+          value={url}
+          aria-invalid={Boolean(error)}
+          aria-describedby={error ? `${id}-error` : undefined}
+          onChange={(event) => onChange(event.target.value)}
+          onPaste={onPaste}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              event.preventDefault()
+              onSubmit(event.currentTarget.value)
+            }
+          }}
+        />
+        <Button variant="light" onPress={() => onSubmit(url)} className="drawer-secondary-button">Load</Button>
+      </div>
+      {error ? <p id={`${id}-error`} className="dataset-url__error">{error}</p> : null}
     </div>
   )
+}
+
+function Readout({ label, value, accent = false }) {
+  return (
+    <div className="dataset-readout__item">
+      <dt>{label}</dt>
+      <dd className={accent ? 'is-accent' : ''}>{value}</dd>
+    </div>
+  )
+}
+
+function formatValue(value) {
+  if (!Number.isFinite(value)) return '—'
+  const absolute = Math.abs(value)
+  if ((absolute > 0 && absolute < 0.001) || absolute >= 100000) return value.toExponential(3)
+  return value.toPrecision(5)
 }

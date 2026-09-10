@@ -8,12 +8,10 @@ export const BASEMAP_IDS = /** @type {const} */ (['dark', 'satellite', 'topo'])
 export const BASEMAPS = {
   dark: {
     label: 'Dark',
-    background: '#06060e',
-    attribution: '© CARTO © OpenStreetMap',
+    background: '#232227',
+    attribution: 'Tiles © Esri — Esri, HERE, Garmin, FAO, NOAA, USGS',
     tiles: [
-      'https://a.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}.png',
-      'https://b.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}.png',
-      'https://c.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}.png',
+      'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}',
     ],
   },
   satellite: {

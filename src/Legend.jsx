@@ -1,33 +1,49 @@
 import { TICK_VALUES, TICK_COLORS } from './heatmapColors'
 
+const MOBILE_TICKS = [0, 250, 500]
+
 export default function Legend({ meta }) {
-  const title = meta?.varName
-    ? `${meta.varName}${meta.units && meta.units !== '—' ? ` — ${meta.units}` : ''}`
-    : 'Scalar field'
+  if (!meta) return null
+
+  const title = meta.varName || 'Source field'
+  const units = meta.units && meta.units !== '—' ? meta.units : ''
+  const isConstant = meta.minValue === meta.maxValue
+  const ticks = isConstant ? [0] : TICK_VALUES
 
   return (
-    <div className="
-      absolute bottom-6 left-1/2 -translate-x-1/2
-      bg-black/80 border border-white/15 backdrop-blur-md
-      rounded-lg px-4 py-3
-      pointer-events-none
-    ">
-      <p className="text-xs tracking-widest uppercase text-white/70 text-center mb-2">
-        {title}
-      </p>
-      <p className="text-[11px] tracking-widest uppercase text-white/50 text-center mb-2 font-mono">
-        Heatmap weight 0–500 (normalized from file min–max)
-      </p>
-      <div className="flex h-2.5 rounded overflow-hidden" style={{ width: 520 }}>
-        {TICK_COLORS.map((color, i) => (
-          <div key={i} className="flex-1" style={{ background: color }} />
-        ))}
+    <section className="source-legend" aria-label="Source value legend">
+      <div className="source-legend__heading">
+        <div>
+          <strong>{title}{units ? <span> · {units}</span> : null}</strong>
+          <small>Source values</small>
+        </div>
+        <span className="source-legend__range">{formatValue(meta.minValue)} — {formatValue(meta.maxValue)}</span>
       </div>
-      <div className="flex justify-between mt-1" style={{ width: 520 }}>
-        {TICK_VALUES.map(v => (
-          <span key={v} className="text-[10px] text-white/55 font-mono">{v}</span>
-        ))}
+      <div className="source-legend__ramp" aria-hidden="true">
+        {TICK_COLORS.map((color, index) => <span key={`${color}-${index}`} style={{ backgroundColor: color }} />)}
       </div>
-    </div>
+      <div className="source-legend__ticks source-legend__ticks--desktop">
+        {ticks.map((weight) => <span key={weight}>{formatTick(weight, meta)}</span>)}
+      </div>
+      <div className="source-legend__ticks source-legend__ticks--mobile">
+        {MOBILE_TICKS.map((weight) => <span key={weight}>{formatTick(weight, meta)}</span>)}
+      </div>
+      <div className="source-legend__footer">
+        <span>{isConstant ? 'Constant source range' : 'Colors are normalized from the file minimum → maximum.'}</span>
+        <span>Render weight 0–500</span>
+      </div>
+    </section>
   )
+}
+
+function formatTick(weight, meta) {
+  if (meta.minValue === meta.maxValue) return formatValue(meta.minValue)
+  return formatValue(meta.minValue + (weight / 500) * (meta.maxValue - meta.minValue))
+}
+
+function formatValue(value) {
+  if (!Number.isFinite(value)) return '—'
+  const absolute = Math.abs(value)
+  if ((absolute > 0 && absolute < 0.001) || absolute >= 100000) return value.toExponential(3)
+  return value.toPrecision(4)
 }

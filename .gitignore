@@ -42,6 +42,7 @@ tmp/
 .DS_Store
 Thumbs.db
 .idea/
+.kombai
 *.swp
 *.swo
 *~
