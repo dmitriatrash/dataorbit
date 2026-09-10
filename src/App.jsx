@@ -26,7 +26,7 @@ export default function App() {
   const [basemap, setBasemap] = useState('dark')
   const [viewMode, setViewMode] = useState('globe')
   const [showNaStateBorders, setShowNaStateBorders] = useState(false)
-  const [isDrawerOpen, setIsDrawerOpen] = useState(false)
+  const [isDrawerOpen, setIsDrawerOpen] = useState(true)
   const [activeDestination, setActiveDestination] = useState('dataset')
   const [openDisclosure, setOpenDisclosure] = useState('surface')
   const [mapResetSignal, setMapResetSignal] = useState(0)
@@ -39,7 +39,9 @@ export default function App() {
     dispatch({ key, value })
   }, [])
 
-  const drawerVisible = status === 'ready' ? isDrawerOpen : true
+  const toggleDrawer = useCallback(() => {
+    setIsDrawerOpen((open) => !open)
+  }, [])
 
   return (
     <div className="dataorbit-app">
@@ -104,8 +106,8 @@ export default function App() {
         onChange={handleChange}
         activeDestination={activeDestination}
         onDestinationChange={setActiveDestination}
-        isOpen={drawerVisible}
-        onToggle={() => setIsDrawerOpen((open) => !open)}
+        isOpen={isDrawerOpen}
+        onToggle={toggleDrawer}
         openDisclosure={openDisclosure}
         onDisclosureChange={setOpenDisclosure}
       />
